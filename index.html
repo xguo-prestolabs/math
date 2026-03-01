@@ -5,16 +5,97 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Parametric Curve Demo (Canvas)</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 16px; }
+    :root {
+      --bg: #f4f6fb;
+      --panel-bg: #ffffff;
+      --surface: #f8fbff;
+      --border: #d7deea;
+      --text: #111827;
+      --muted: #5f6a7d;
+      --accent: #e11d48;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: Inter, system-ui, -apple-system, sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at 10% 0%, #eef3ff, var(--bg) 42%);
+    }
+
+    h2 { margin: 0 0 14px; font-size: 1.35rem; }
+
     #row { display: flex; gap: 16px; align-items: start; flex-wrap: wrap; }
-    canvas { border: 1px solid #ddd; border-radius: 10px; }
-    .panel { width: 300px; border: 1px solid #eee; border-radius: 10px; padding: 12px; }
-    label { display:block; margin: 10px 0 6px; color:#222; }
-    input[type="range"], select { width: 100%; }
-    .kv { display:flex; justify-content:space-between; font-variant-numeric: tabular-nums; color:#444; }
-    button { margin-top: 12px; width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
-    button:hover { background: #f3f3f3; }
-    .hint { margin-top: 10px; color:#666; font-size: 12px; line-height: 1.4; }
+
+    canvas {
+      display: block;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: 0 14px 30px rgba(15, 23, 42, 0.09);
+    }
+
+    .panel {
+      width: 320px;
+      max-width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      background: var(--panel-bg);
+      box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    label {
+      display: block;
+      margin: 10px 0 6px;
+      color: var(--text);
+      font-size: 0.92rem;
+      font-weight: 600;
+    }
+
+    input[type="range"], select {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    input[type="range"]:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .kv {
+      display: flex;
+      justify-content: space-between;
+      font-variant-numeric: tabular-nums;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    button {
+      margin-top: 12px;
+      width: 100%;
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--text);
+      cursor: pointer;
+      transition: background-color 140ms ease, transform 120ms ease;
+    }
+
+    button:hover { background: #f2f5fb; }
+    button:active { transform: translateY(1px); }
+
+    .hint {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 1120px) {
+      canvas { width: min(100%, 760px); height: auto; }
+      .panel { width: min(760px, 100%); }
+    }
   </style>
 </head>
 <body>
@@ -89,6 +170,8 @@
     origin: { x: canvas.width / 2, y: canvas.height / 2 },
     scale: 1
   };
+  const FIT_PADDING = 28;
+  const MIN_SPAN = 1e-6;
 
   function worldToScreen(p) {
     return {
@@ -100,7 +183,6 @@
   const presets = {
     circle: {
       t0: 0, t1: Math.PI * 2,
-      defaultScale: 1,
       paramsUI: [
         { name: "R", min: 20, max: 220, step: 1, value: 140 },
         { name: "-", disabled: true },
@@ -112,7 +194,6 @@
 
     lissajous: {
       t0: 0, t1: Math.PI * 2,
-      defaultScale: 1,
       paramsUI: [
         { name: "A", min: 20, max: 200, step: 1, value: 160 },
         { name: "a", min: 1, max: 10, step: 1, value: 3 },
@@ -128,7 +209,6 @@
 
     spiral: {
       t0: 0, t1: 10 * Math.PI,
-      defaultScale: 10,
       paramsUI: [
         { name: "k", min: 5, max: 40, step: 1, value: 18 },
         { name: "-", disabled: true },
@@ -140,7 +220,6 @@
 
     cycloid: {
       t0: 0, t1: 4 * Math.PI,
-      defaultScale: 1,
       paramsUI: [
         { name: "R", min: 10, max: 120, step: 1, value: 60 },
         { name: "-", disabled: true },
@@ -166,8 +245,6 @@
     tSlider.min = String(pr.t0);
     tSlider.max = String(pr.t1);
     tSlider.value = String(pr.t0);
-
-    viewport.scale = pr.defaultScale;
 
     const uis = pr.paramsUI;
     const slots = [
@@ -220,8 +297,75 @@
     return pts;
   }
 
-  function drawGridAxes() {
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function boundsFromPoints(points) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    points.forEach(({ x, y }) => {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    });
+    return { minX, maxX, minY, maxY };
+  }
+
+  function fitViewportToPoints(points, padding = FIT_PADDING) {
+    if (!points.length) return;
+    const { minX, maxX, minY, maxY } = boundsFromPoints(points);
+    const spanX = Math.max(maxX - minX, MIN_SPAN);
+    const spanY = Math.max(maxY - minY, MIN_SPAN);
+    const drawWidth = Math.max(1, canvas.width - padding * 2);
+    const drawHeight = Math.max(1, canvas.height - padding * 2);
+
+    viewport.scale = Math.min(drawWidth / spanX, drawHeight / spanY);
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    viewport.origin.x = canvas.width / 2 - cx * viewport.scale;
+    viewport.origin.y = canvas.height / 2 + cy * viewport.scale;
+  }
+
+  function drawBackdrop() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#f8fbff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(100, 116, 139, 0.18)";
+    ctx.lineWidth = 1;
+    const grid = 40;
+    for (let x = grid + 0.5; x < canvas.width; x += grid) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, canvas.height);
+      ctx.stroke();
+    }
+    for (let y = grid + 0.5; y < canvas.height; y += grid) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(canvas.width, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    const xAxisY = viewport.origin.y;
+    const yAxisX = viewport.origin.x;
+    ctx.strokeStyle = "rgba(30, 41, 59, 0.45)";
+    ctx.lineWidth = 1.6;
+    if (xAxisY >= 0 && xAxisY <= canvas.height) {
+      ctx.beginPath();
+      ctx.moveTo(0, xAxisY);
+      ctx.lineTo(canvas.width, xAxisY);
+      ctx.stroke();
+    }
+    if (yAxisX >= 0 && yAxisX <= canvas.width) {
+      ctx.beginPath();
+      ctx.moveTo(yAxisX, 0);
+      ctx.lineTo(yAxisX, canvas.height);
+      ctx.stroke();
+    }
   }
 
   function drawPolyline(points, strokeStyle, lineWidth) {
@@ -265,20 +409,31 @@
     const t = Number(tSlider.value);
     const pointFn = pr.point;
 
-    drawGridAxes();
-
     const allPts = sampleCurve(pointFn, P, t0, t1, 1200);
+    fitViewportToPoints(allPts);
+    drawBackdrop();
+
     drawPolyline(allPts, "#111", 2);
 
-    const tailPts = sampleCurve(pointFn, P, t0, t, Math.max(10, Math.floor(1200 * (t - t0) / (t1 - t0))));
+    const ratio = (t - t0) / (t1 - t0 || 1);
+    const endIdx = clamp(Math.round(ratio * (allPts.length - 1)), 0, allPts.length - 1);
+    const tailPts = allPts.slice(0, endIdx + 1);
+    tailPts.push(pointFn(t, P));
     drawPolyline(tailPts, "#e11d48", 3);
 
     const p = pointFn(t, P);
     drawDot(p, "#fb7185", 7);
 
     const s = worldToScreen(p);
-    ctx.fillStyle = "#333";
-    ctx.fillText(`x=${p.x.toFixed(2)}, y=${p.y.toFixed(2)}`, s.x + 10, s.y - 10);
+    const label = `x=${p.x.toFixed(2)}, y=${p.y.toFixed(2)}`;
+    ctx.font = "13px Inter, system-ui, sans-serif";
+    const textW = ctx.measureText(label).width;
+    const lx = clamp(s.x + 12, 8, canvas.width - textW - 12);
+    const ly = clamp(s.y - 12, 16, canvas.height - 8);
+    ctx.fillStyle = "rgba(17, 24, 39, 0.82)";
+    ctx.fillRect(lx - 4, ly - 12, textW + 8, 18);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(label, lx, ly);
   }
 
   let playing = false;
