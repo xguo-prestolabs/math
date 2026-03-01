@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Parametric Curve Demo (Canvas)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; }
+    #row { display: flex; gap: 16px; align-items: start; flex-wrap: wrap; }
+    canvas { border: 1px solid #ddd; border-radius: 10px; }
+    .panel { width: 300px; border: 1px solid #eee; border-radius: 10px; padding: 12px; }
+    label { display:block; margin: 10px 0 6px; color:#222; }
+    input[type="range"], select { width: 100%; }
+    .kv { display:flex; justify-content:space-between; font-variant-numeric: tabular-nums; color:#444; }
+    button { margin-top: 12px; width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
+    button:hover { background: #f3f3f3; }
+    .hint { margin-top: 10px; color:#666; font-size: 12px; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <h2>Parametric Curve Demo (Canvas + Vanilla JS)</h2>
+
+  <div id="row">
+    <canvas id="c" width="760" height="520"></canvas>
+
+    <div class="panel">
+      <label>Curve Type</label>
+      <select id="preset">
+        <option value="circle">Circle: x = R cos t, y = R sin t</option>
+        <option value="lissajous">Lissajous: x = A sin(a t + δ), y = B sin(b t)</option>
+        <option value="spiral">Spiral: x = t cos t, y = t sin t</option>
+        <option value="cycloid">Cycloid: x = R(t − sin t), y = R(1 − cos t)</option>
+      </select>
+
+      <label>t</label>
+      <input id="t" type="range" min="0" max="6.283185" step="0.001" value="0" />
+      <div class="kv"><span>t</span><span id="tval">0</span></div>
+
+      <label>Playback Speed</label>
+      <input id="spd" type="range" min="0" max="4" step="0.01" value="1" />
+      <div class="kv"><span>speed</span><span id="spdval">1</span></div>
+
+      <label>Parameter 1</label>
+      <input id="p1" type="range" min="20" max="200" step="1" value="120" />
+      <div class="kv"><span id="p1name">R</span><span id="p1val">120</span></div>
+
+      <label>Parameter 2</label>
+      <input id="p2" type="range" min="1" max="10" step="1" value="3" />
+      <div class="kv"><span id="p2name">a</span><span id="p2val">3</span></div>
+
+      <label>Parameter 3</label>
+      <input id="p3" type="range" min="1" max="10" step="1" value="2" />
+      <div class="kv"><span id="p3name">b</span><span id="p3val">2</span></div>
+
+      <label>Parameter 4</label>
+      <input id="p4" type="range" min="0" max="3.14159" step="0.001" value="0.5" />
+      <div class="kv"><span id="p4name">δ</span><span id="p4val">0.500</span></div>
+
+      <button id="toggle">▶ Play</button>
+
+      <div class="hint">
+        Black line = full curve.<br/>
+        Red line = trajectory up to current t.<br/>
+        Pink dot = current point.<br/><br/>
+        You can extend this by adding: zoom/pan, tangent vector, curvature,
+        export to PNG, etc.
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+
+  const el = (id) => document.getElementById(id);
+  const presetSel = el("preset");
+  const tSlider = el("t");
+  const spdSlider = el("spd");
+  const p1 = el("p1"), p2 = el("p2"), p3 = el("p3"), p4 = el("p4");
+
+  const tval = el("tval"), spdval = el("spdval");
+  const p1name = el("p1name"), p2name = el("p2name"), p3name = el("p3name"), p4name = el("p4name");
+  const p1val = el("p1val"), p2val = el("p2val"), p3val = el("p3val"), p4val = el("p4val");
+
+  const toggleBtn = el("toggle");
+
+  const viewport = {
+    origin: { x: canvas.width / 2, y: canvas.height / 2 },
+    scale: 1
+  };
+
+  function worldToScreen(p) {
+    return {
+      x: viewport.origin.x + p.x * viewport.scale,
+      y: viewport.origin.y - p.y * viewport.scale
+    };
+  }
+
+  const presets = {
+    circle: {
+      t0: 0, t1: Math.PI * 2,
+      defaultScale: 1,
+      paramsUI: [
+        { name: "R", min: 20, max: 220, step: 1, value: 140 },
+        { name: "-", disabled: true },
+        { name: "-", disabled: true },
+        { name: "-", disabled: true },
+      ],
+      point: (t, P) => ({ x: P.R * Math.cos(t), y: P.R * Math.sin(t) })
+    },
+
+    lissajous: {
+      t0: 0, t1: Math.PI * 2,
+      defaultScale: 1,
+      paramsUI: [
+        { name: "A", min: 20, max: 200, step: 1, value: 160 },
+        { name: "a", min: 1, max: 10, step: 1, value: 3 },
+        { name: "b", min: 1, max: 10, step: 1, value: 2 },
+        { name: "δ", min: 0, max: Math.PI, step: 0.001, value: 0.5 },
+      ],
+      point: (t, P) => ({
+        x: P.A * Math.sin(P.a * t + P.d),
+        y: P.B * Math.sin(P.b * t)
+      }),
+      mapParams: (raw) => ({ A: raw.p1, B: raw.p1, a: raw.p2, b: raw.p3, d: raw.p4 })
+    },
+
+    spiral: {
+      t0: 0, t1: 10 * Math.PI,
+      defaultScale: 10,
+      paramsUI: [
+        { name: "k", min: 5, max: 40, step: 1, value: 18 },
+        { name: "-", disabled: true },
+        { name: "-", disabled: true },
+        { name: "-", disabled: true },
+      ],
+      point: (t, P) => ({ x: (t * P.k) * Math.cos(t), y: (t * P.k) * Math.sin(t) })
+    },
+
+    cycloid: {
+      t0: 0, t1: 4 * Math.PI,
+      defaultScale: 1,
+      paramsUI: [
+        { name: "R", min: 10, max: 120, step: 1, value: 60 },
+        { name: "-", disabled: true },
+        { name: "-", disabled: true },
+        { name: "-", disabled: true },
+      ],
+      point: (t, P) => ({ x: P.R * (t - Math.sin(t)), y: P.R * (1 - Math.cos(t)) })
+    }
+  };
+
+  function setSlider(slider, {min, max, step, value, disabled}) {
+    slider.min = String(min ?? slider.min);
+    slider.max = String(max ?? slider.max);
+    slider.step = String(step ?? slider.step);
+    if (value !== undefined) slider.value = String(value);
+    slider.disabled = !!disabled;
+  }
+
+  function applyPresetUI() {
+    const key = presetSel.value;
+    const pr = presets[key];
+
+    tSlider.min = String(pr.t0);
+    tSlider.max = String(pr.t1);
+    tSlider.value = String(pr.t0);
+
+    viewport.scale = pr.defaultScale;
+
+    const uis = pr.paramsUI;
+    const slots = [
+      { slider: p1, nameEl: p1name, valEl: p1val },
+      { slider: p2, nameEl: p2name, valEl: p2val },
+      { slider: p3, nameEl: p3name, valEl: p3val },
+      { slider: p4, nameEl: p4name, valEl: p4val },
+    ];
+
+    uis.forEach((ui, i) => {
+      const s = slots[i];
+      s.nameEl.textContent = ui.name;
+      if (ui.disabled) {
+        setSlider(s.slider, { disabled: true });
+        s.valEl.textContent = "-";
+      } else {
+        setSlider(s.slider, ui);
+      }
+    });
+
+    render();
+  }
+
+  function getRawParams() {
+    return {
+      p1: Number(p1.value),
+      p2: Number(p2.value),
+      p3: Number(p3.value),
+      p4: Number(p4.value)
+    };
+  }
+
+  function getParamsForPreset() {
+    const key = presetSel.value;
+    const pr = presets[key];
+    const raw = getRawParams();
+
+    if (pr.mapParams) return pr.mapParams(raw);
+    if (key === "circle" || key === "cycloid") return { R: raw.p1 };
+    if (key === "spiral") return { k: raw.p1 };
+    return { R: raw.p1, a: raw.p2, b: raw.p3, d: raw.p4 };
+  }
+
+  function sampleCurve(pointFn, P, t0, t1, n = 1200) {
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+      const tt = t0 + (t1 - t0) * (i / n);
+      pts.push(pointFn(tt, P));
+    }
+    return pts;
+  }
+
+  function drawGridAxes() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  function drawPolyline(points, strokeStyle, lineWidth) {
+    if (!points.length) return;
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    points.forEach((p, i) => {
+      const s = worldToScreen(p);
+      if (i === 0) ctx.moveTo(s.x, s.y);
+      else ctx.lineTo(s.x, s.y);
+    });
+    ctx.stroke();
+  }
+
+  function drawDot(p, fillStyle, r = 6) {
+    const s = worldToScreen(p);
+    ctx.fillStyle = fillStyle;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function updateLabels() {
+    tval.textContent = Number(tSlider.value).toFixed(3);
+    spdval.textContent = Number(spdSlider.value).toFixed(2);
+    if (!p1.disabled) p1val.textContent = Number(p1.value).toFixed(3);
+    if (!p2.disabled) p2val.textContent = Number(p2.value).toFixed(3);
+    if (!p3.disabled) p3val.textContent = Number(p3.value).toFixed(3);
+    if (!p4.disabled) p4val.textContent = Number(p4.value).toFixed(3);
+  }
+
+  function render() {
+    updateLabels();
+
+    const key = presetSel.value;
+    const pr = presets[key];
+    const P = getParamsForPreset();
+
+    const t0 = pr.t0, t1 = pr.t1;
+    const t = Number(tSlider.value);
+    const pointFn = pr.point;
+
+    drawGridAxes();
+
+    const allPts = sampleCurve(pointFn, P, t0, t1, 1200);
+    drawPolyline(allPts, "#111", 2);
+
+    const tailPts = sampleCurve(pointFn, P, t0, t, Math.max(10, Math.floor(1200 * (t - t0) / (t1 - t0))));
+    drawPolyline(tailPts, "#e11d48", 3);
+
+    const p = pointFn(t, P);
+    drawDot(p, "#fb7185", 7);
+
+    const s = worldToScreen(p);
+    ctx.fillStyle = "#333";
+    ctx.fillText(`x=${p.x.toFixed(2)}, y=${p.y.toFixed(2)}`, s.x + 10, s.y - 10);
+  }
+
+  let playing = false;
+  let last = performance.now();
+
+  function tick(now) {
+    const dt = (now - last) / 1000;
+    last = now;
+
+    if (playing) {
+      const key = presetSel.value;
+      const pr = presets[key];
+      const speed = Number(spdSlider.value);
+      let t = Number(tSlider.value);
+      t += dt * speed;
+      if (t > pr.t1) t = pr.t0;
+      tSlider.value = String(t);
+      render();
+    }
+
+    requestAnimationFrame(tick);
+  }
+
+  [presetSel, tSlider, spdSlider, p1, p2, p3, p4].forEach(x => x.addEventListener("input", render));
+  presetSel.addEventListener("change", applyPresetUI);
+
+  toggleBtn.addEventListener("click", () => {
+    playing = !playing;
+    toggleBtn.textContent = playing ? "⏸ Pause" : "▶ Play";
+  });
+
+  applyPresetUI();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
